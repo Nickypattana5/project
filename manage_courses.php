@@ -10,9 +10,15 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'teacher') {
 
 $teacher_id = $_SESSION['user_id'];
 $fullname = $_SESSION['fullname'];
-$role = $_SESSION['role'];
+$role = $_SESSION['role']; // เพิ่ม role เพื่อใช้ใน sidebar
 $msg = "";
-$msg_type = ""; // success, danger
+$msg_type = ""; // success, danger, warning
+
+// นับจำนวนแจ้งเตือน (สำหรับ Sidebar)
+$count_advisor_invite = 0;
+$q3 = $conn->prepare("SELECT COUNT(*) FROM advisor_invites WHERE teacher_id = ? AND status = 'pending'");
+$q3->bind_param("i", $teacher_id); $q3->execute();
+$count_advisor_invite = $q3->get_result()->fetch_row()[0];
 
 // ------------------------------
 // ✅ เพิ่มรายวิชา
@@ -75,7 +81,7 @@ $result = $conn->query("SELECT * FROM courses WHERE teacher_id = $teacher_id ORD
 <title>จัดการรายวิชา</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-    /* Global & Sidebar Theme (เหมือน Dashboard) */
+    /* Global & Sidebar Theme */
     * { box-sizing: border-box; }
     body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6f9; color: #333; }
 
@@ -89,6 +95,7 @@ $result = $conn->query("SELECT * FROM courses WHERE teacher_id = $teacher_id ORD
     .nav-links a:hover { background: rgba(255,255,255,0.1); color: white; border-left-color: #60a5fa; }
     .nav-links a.active { background: #2563eb; color: white; border-left-color: #fff; font-weight: bold; }
     .nav-links a i { width: 25px; text-align: center; margin-right: 10px; }
+    .menu-badge { background: #fbbf24; color: #1e3a8a; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-left: auto; font-weight: bold; }
     .logout-btn { margin: 20px; padding: 12px; text-align: center; background: #dc2626; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: 0.2s; }
     .logout-btn:hover { background: #b91c1c; }
 
@@ -146,11 +153,11 @@ $result = $conn->query("SELECT * FROM courses WHERE teacher_id = $teacher_id ORD
         <p><?= htmlspecialchars($fullname) ?> <br> (Teacher)</p>
     </div>
     <div class="nav-links">
+        <a href="dashboard.php"><i class="fas fa-home"></i> แดชบอร์ด</a>
         <a href="manage_courses.php" class="active"><i class="fas fa-book"></i> จัดการรายวิชา</a>
         <a href="teacher_groups.php"><i class="fas fa-user-graduate"></i> กลุ่มที่ปรึกษา</a>
         <a href="teacher_enrollments.php"><i class="fas fa-tasks"></i> อนุมัติลงทะเบียน</a>
-        <a href="advisor_invitations.php"><i class="fas fa-envelope-open-text"></i> คำเชิญที่ปรึกษา</a>
-        <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
+        <a href="advisor_invitations.php"><i class="fas fa-envelope-open-text"></i> คำเชิญที่ปรึกษา <?php if ($count_advisor_invite > 0): ?><span class="menu-badge"><?= $count_advisor_invite ?></span><?php endif; ?></a>
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
 </div>

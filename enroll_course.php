@@ -21,6 +21,12 @@ $q->bind_param("i", $student_id);
 $q->execute();
 if ($q->get_result()->num_rows > 0) $has_project_access = true;
 
+// นับจำนวนแจ้งเตือนสำหรับ Sidebar
+$count_invite = 0;
+$c_inv_q = $conn->prepare("SELECT COUNT(*) FROM project_members WHERE student_id = ? AND is_confirmed = 0");
+$c_inv_q->bind_param("i", $student_id); $c_inv_q->execute();
+$count_invite = $c_inv_q->get_result()->fetch_row()[0];
+
 // ส่วนจัดการเมื่อกดลงทะเบียน
 if (isset($_GET['enroll'])) {
     $course_id = intval($_GET['enroll']);
@@ -66,8 +72,8 @@ if (isset($_GET['enroll'])) {
             $msg_type = "success";
             
             // ส่ง Notification
+            // (ใช้ group_id เก็บ course_id ชั่วคราวเพื่อให้ลิ้งค์ไปถูก)
             $n_stmt = $conn->prepare("INSERT INTO notifications (receiver_id, sender_id, type, group_id, message, is_read, created_at) VALUES (?, ?, 'enroll_request', ?, ?, 0, NOW())");
-            // ใช้ group_id เก็บ course_id ชั่วคราวเพื่อให้ลิ้งค์ไปถูก
             $n_stmt->bind_param("iiis", $teacher_id, $student_id, $course_id, $notif_msg);
             $n_stmt->execute();
         } elseif (empty($msg)) {
@@ -103,14 +109,13 @@ $courses = $stmt->get_result();
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ลงทะเบียนเรียน</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-    /* Global Reset & Theme */
+    /* Theme Dashboard */
     * { box-sizing: border-box; }
     body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6f9; color: #333; }
-
+    
     /* Sidebar */
     .sidebar { width: 260px; height: 100vh; background: #1e3a8a; color: white; position: fixed; left: 0; top: 0; display: flex; flex-direction: column; z-index: 100; }
     .sidebar-header { padding: 20px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
@@ -121,12 +126,12 @@ $courses = $stmt->get_result();
     .nav-links a:hover { background: rgba(255,255,255,0.1); color: white; border-left-color: #60a5fa; }
     .nav-links a.active { background: #2563eb; color: white; border-left-color: #fff; font-weight: bold; }
     .nav-links a i { width: 25px; text-align: center; margin-right: 10px; }
+    .menu-badge { background: #fbbf24; color: #1e3a8a; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-left: auto; font-weight: bold; }
     .logout-btn { margin: 20px; padding: 12px; text-align: center; background: #dc2626; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: 0.2s; }
     .logout-btn:hover { background: #b91c1c; }
 
     /* Main Content */
     .main-content { margin-left: 260px; padding: 30px; }
-    
     .page-header { margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
     .page-header h1 { margin: 0; font-size: 24px; color: #1e3a8a; }
 
@@ -138,7 +143,6 @@ $courses = $stmt->get_result();
 
     /* Card & Table */
     .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); border: 1px solid #e2e8f0; }
-    
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 15px; text-align: left; border-bottom: 1px solid #f1f5f9; }
     th { background: #f8fafc; color: #64748b; font-weight: 600; font-size: 14px; }
@@ -147,13 +151,10 @@ $courses = $stmt->get_result();
 
     /* Badges & Buttons */
     .btn { padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; transition: 0.2s; border: none; cursor: pointer; }
-    
     .btn-enroll { background: #2563eb; color: white; }
     .btn-enroll:hover { background: #1d4ed8; }
-
     .btn-retry { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
     .btn-retry:hover { background: #fde68a; }
-
     .badge { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-flex; align-items: center; gap: 5px; }
     .badge-approved { background: #dcfce7; color: #166534; }
     .badge-pending { background: #f1f5f9; color: #64748b; }
@@ -176,7 +177,9 @@ $courses = $stmt->get_result();
         <a href="my_courses.php"><i class="fas fa-list"></i> วิชาที่ลงทะเบียน</a>
         <?php if ($has_project_access): ?>
             <a href="my_groups.php"><i class="fas fa-users"></i> กลุ่มโครงงาน</a>
-            <a href="invitations.php"><i class="fas fa-envelope"></i> คำเชิญเข้ากลุ่ม</a>
+            <?php if ($count_invite > 0): ?>
+                <a href="invitations.php"><i class="fas fa-envelope"></i> คำเชิญเข้ากลุ่ม <span class="menu-badge"><?= $count_invite ?></span></a>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>

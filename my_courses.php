@@ -2,7 +2,7 @@
 session_start();
 include 'db_connect.php';
 
-// ตรวจสอบสิทธิ์นักเรียน
+// ตรวจสอบสิทธิ์นิสิต
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'student') {
     header("Location: login.php");
     exit;
@@ -12,9 +12,9 @@ $student_id = $_SESSION['user_id'];
 $fullname = $_SESSION['fullname'];
 $role = $_SESSION['role'];
 $msg = "";
-$msg_type = ""; // success, danger, warning
+$msg_type = "";
 
-// 🔥 เคลียร์แจ้งเตือนทันทีที่เข้ามาหน้านี้
+// 🔥 เคลียร์แจ้งเตือนผลการลงทะเบียน/ถอน (enrollment_result, drop_result) ทันที
 $clear_notif = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE receiver_id = ? AND type IN ('enrollment_result', 'drop_result')");
 $clear_notif->bind_param("i", $student_id);
 $clear_notif->execute();
@@ -26,12 +26,19 @@ $q->bind_param("i", $student_id);
 $q->execute();
 if ($q->get_result()->num_rows > 0) $has_project_access = true;
 
+// นับจำนวนแจ้งเตือนคำเชิญ (สำหรับ Sidebar)
+$count_invite = 0;
+$c_inv_q = $conn->prepare("SELECT COUNT(*) FROM project_members WHERE student_id = ? AND is_confirmed = 0");
+$c_inv_q->bind_param("i", $student_id); $c_inv_q->execute();
+$count_invite = $c_inv_q->get_result()->fetch_row()[0];
+
 // --- จัดการ Action ---
 if (isset($_GET['action']) && isset($_GET['id'])) {
     $enroll_id = intval($_GET['id']);
     $action = $_GET['action'];
 
     if ($action == 'cancel_req') {
+        // ยกเลิกตอน Pending -> ลบทิ้ง
         $stmt = $conn->prepare("DELETE FROM enrollments WHERE id = ? AND student_id = ? AND status = 'pending'");
         $stmt->bind_param("ii", $enroll_id, $student_id);
         if ($stmt->execute()) {
@@ -40,14 +47,16 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
         }
     } 
     elseif ($action == 'delete_rejected') {
+        // ลบรายการที่ไม่ผ่าน (เพื่อให้ลงใหม่ได้)
         $stmt = $conn->prepare("DELETE FROM enrollments WHERE id = ? AND student_id = ? AND status = 'rejected'");
         $stmt->bind_param("ii", $enroll_id, $student_id);
         if ($stmt->execute()) {
-            $msg = "🗑️ ลบรายการที่ไม่ผ่านออกเรียบร้อย (สามารถลงใหม่ได้)";
+            $msg = "🗑️ ลบรายการที่ไม่ผ่านออกเรียบร้อย (สามารถลงทะเบียนใหม่ได้)";
             $msg_type = "success";
         }
     }
     elseif ($action == 'request_drop') {
+        // ขอถอนรายวิชา
         $info_q = $conn->prepare("SELECT c.teacher_id, c.course_name, c.course_code, c.id AS course_id FROM enrollments e JOIN courses c ON e.course_id = c.id WHERE e.id = ?");
         $info_q->bind_param("i", $enroll_id);
         $info_q->execute();
@@ -55,16 +64,20 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
 
         $stmt = $conn->prepare("UPDATE enrollments SET status = 'drop_pending' WHERE id = ? AND student_id = ? AND status = 'approved'");
         $stmt->bind_param("ii", $enroll_id, $student_id);
+        
         if ($stmt->execute() && $info) {
+            // ส่งแจ้งเตือนหาอาจารย์
             $notif_msg = "นิสิต " . $_SESSION['fullname'] . " ขอถอนรายวิชา " . $info['course_code'];
             $n = $conn->prepare("INSERT INTO notifications (receiver_id, sender_id, type, group_id, message, is_read, created_at) VALUES (?, ?, 'drop_request', ?, ?, 0, NOW())");
             $n->bind_param("iiis", $info['teacher_id'], $student_id, $info['course_id'], $notif_msg);
             $n->execute();
+            
             $msg = "✅ ส่งคำขอถอนรายวิชาเรียบร้อย รออาจารย์อนุมัติ";
             $msg_type = "warning";
         }
     }
     elseif ($action == 'cancel_drop') {
+        // ยกเลิกการขอถอน
         $stmt = $conn->prepare("UPDATE enrollments SET status = 'approved' WHERE id = ? AND student_id = ? AND status = 'drop_pending'");
         $stmt->bind_param("ii", $enroll_id, $student_id);
         if ($stmt->execute()) {
@@ -74,8 +87,16 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
     }
 }
 
-// ดึงข้อมูล
-$sql = "SELECT e.id AS enroll_id, e.status, e.enrolled_at, c.course_code, c.course_name, u.fullname AS teacher_name FROM enrollments e JOIN courses c ON e.course_id = c.id JOIN users u ON c.teacher_id = u.id WHERE e.student_id = ? ORDER BY e.enrolled_at DESC";
+// ดึงข้อมูลรายวิชาของฉัน
+$sql = "
+    SELECT e.id AS enroll_id, e.status, e.enrolled_at, 
+           c.course_code, c.course_name, u.fullname AS teacher_name 
+    FROM enrollments e 
+    JOIN courses c ON e.course_id = c.id 
+    JOIN users u ON c.teacher_id = u.id 
+    WHERE e.student_id = ? 
+    ORDER BY e.enrolled_at DESC
+";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param("i", $student_id);
 $stmt->execute();
@@ -86,14 +107,13 @@ $result = $stmt->get_result();
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>วิชาที่ลงทะเบียนแล้ว</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-    /* Global Reset & Theme */
+    /* Theme Dashboard */
     * { box-sizing: border-box; }
     body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6f9; color: #333; }
-
+    
     /* Sidebar */
     .sidebar { width: 260px; height: 100vh; background: #1e3a8a; color: white; position: fixed; left: 0; top: 0; display: flex; flex-direction: column; z-index: 100; }
     .sidebar-header { padding: 20px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
@@ -104,12 +124,12 @@ $result = $stmt->get_result();
     .nav-links a:hover { background: rgba(255,255,255,0.1); color: white; border-left-color: #60a5fa; }
     .nav-links a.active { background: #2563eb; color: white; border-left-color: #fff; font-weight: bold; }
     .nav-links a i { width: 25px; text-align: center; margin-right: 10px; }
+    .menu-badge { background: #fbbf24; color: #1e3a8a; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-left: auto; font-weight: bold; }
     .logout-btn { margin: 20px; padding: 12px; text-align: center; background: #dc2626; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: 0.2s; }
     .logout-btn:hover { background: #b91c1c; }
 
     /* Main Content */
     .main-content { margin-left: 260px; padding: 30px; }
-    
     .page-header { margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
     .page-header h1 { margin: 0; font-size: 24px; color: #1e3a8a; }
 
@@ -121,7 +141,6 @@ $result = $stmt->get_result();
 
     /* Card & Table */
     .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); border: 1px solid #e2e8f0; }
-    
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 15px; text-align: left; border-bottom: 1px solid #f1f5f9; }
     th { background: #f8fafc; color: #64748b; font-weight: 600; font-size: 14px; }
@@ -129,7 +148,7 @@ $result = $stmt->get_result();
     tr:hover { background: #f8fafc; }
 
     /* Badges */
-    .badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block; }
+    .badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-flex; align-items: center; gap: 5px; }
     .bg-pending { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
     .bg-approved { background: #f0fdf4; color: #15803d; border: 1px solid #dcfce7; }
     .bg-rejected { background: #fef2f2; color: #b91c1c; border: 1px solid #fee2e2; }
@@ -149,6 +168,9 @@ $result = $stmt->get_result();
 
     .btn-ack { background: #1f2937; color: white; }
     .btn-ack:hover { background: #111827; }
+    
+    .btn-add { background: #2563eb; color: white; }
+    .btn-add:hover { background: #1d4ed8; }
 
     .empty-state { text-align: center; padding: 50px; color: #94a3b8; }
     .empty-state i { font-size: 48px; margin-bottom: 15px; display: block; color: #cbd5e1; }
@@ -167,7 +189,9 @@ $result = $stmt->get_result();
         <a href="my_courses.php" class="active"><i class="fas fa-list"></i> วิชาที่ลงทะเบียน</a>
         <?php if ($has_project_access): ?>
             <a href="my_groups.php"><i class="fas fa-users"></i> กลุ่มโครงงาน</a>
-            <a href="invitations.php"><i class="fas fa-envelope"></i> คำเชิญเข้ากลุ่ม</a>
+            <?php if ($count_invite > 0): ?>
+                <a href="invitations.php"><i class="fas fa-envelope"></i> คำเชิญเข้ากลุ่ม <span class="menu-badge"><?= $count_invite ?></span></a>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
@@ -177,7 +201,7 @@ $result = $stmt->get_result();
     
     <div class="page-header">
         <h1>📚 รายวิชาที่ฉันลงทะเบียนไว้</h1>
-        <a href="enroll_course.php" class="btn btn-undo" style="background:#2563eb; color:white;">
+        <a href="enroll_course.php" class="btn btn-add">
             <i class="fas fa-plus"></i> ลงทะเบียนเพิ่ม
         </a>
     </div>

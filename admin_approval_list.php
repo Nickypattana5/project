@@ -1,6 +1,4 @@
 <?php
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
 session_start();
 include 'db_connect.php';
 
@@ -12,14 +10,24 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 
 $fullname = $_SESSION['fullname'];
 
-// ดึงคำขออนุมัติทั้งหมด
+// 🔥 เคลียร์แจ้งเตือน "คำขออนุมัติ" (invite_admin) ทันทีที่เข้ามาหน้านี้
+$clear_notif = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE receiver_id = ? AND type = 'invite_admin'");
+$clear_notif->bind_param("i", $_SESSION['user_id']);
+$clear_notif->execute();
+
+// ดึงคำขออนุมัติทั้งหมด + รายละเอียดวิชาและที่ปรึกษา
 $sql = "
-    SELECT r.id, r.group_id, r.status, r.created_at,
-           g.project_name,
-           u.fullname AS requester_name
+    SELECT 
+        r.id AS req_id, r.group_id, r.status AS req_status, r.created_at,
+        g.project_name, g.status AS group_status,
+        u.fullname AS requester_name,
+        c.course_code, c.course_name,
+        a.fullname AS advisor_name
     FROM project_approval_requests r
     JOIN project_groups g ON r.group_id = g.id
     JOIN users u ON r.requested_by = u.id
+    LEFT JOIN courses c ON g.course_id = c.id
+    LEFT JOIN users a ON g.advisor_id = a.id
     ORDER BY 
         CASE WHEN r.status = 'pending' THEN 1 ELSE 2 END, -- เอา Pending ขึ้นก่อน
         r.created_at DESC
@@ -35,7 +43,7 @@ $result = $conn->query($sql);
 <title>รายการคำขออนุมัติโครงงาน</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-    /* Global Reset & Theme */
+    /* Theme Dashboard */
     * { box-sizing: border-box; }
     body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6f9; color: #333; }
 
@@ -55,7 +63,7 @@ $result = $conn->query($sql);
     /* Main Content */
     .main-content { margin-left: 260px; padding: 30px; }
     
-    .page-header { margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
+    .page-header { margin-bottom: 25px; }
     .page-header h1 { margin: 0; font-size: 24px; color: #1e3a8a; }
 
     /* Alert */
@@ -75,11 +83,15 @@ $result = $conn->query($sql);
     td { font-size: 14px; color: #334155; vertical-align: middle; }
     tr:hover { background: #f8fafc; }
 
-    /* Status Badges */
-    .badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block; text-transform: uppercase; }
+    /* Badges & Info */
+    .badge { padding: 5px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; display: inline-block; text-transform: uppercase; }
     .bg-pending { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
     .bg-approved { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
     .bg-rejected { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+
+    .course-tag { background: #e0f2fe; color: #0369a1; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; display: inline-block; margin-bottom: 4px; }
+    .text-muted { color: #94a3b8; font-size: 12px; }
+    .advisor-text { font-size: 13px; color: #475569; display: flex; align-items: center; gap: 5px; }
 
     /* Action Button */
     .btn-review { 
@@ -127,9 +139,10 @@ $result = $conn->query($sql);
             <table>
                 <thead>
                     <tr>
-                        <th>ชื่อโครงงาน</th>
-                        <th>ผู้ขอ (หัวหน้ากลุ่ม)</th>
-                        <th>วันที่ส่งเรื่อง</th>
+                        <th width="25%">ชื่อโครงงาน</th>
+                        <th width="20%">รายวิชา</th>
+                        <th>ผู้ขอ (หัวหน้า)</th>
+                        <th>ที่ปรึกษา</th>
                         <th>สถานะ</th>
                         <th>การดำเนินการ</th>
                     </tr>
@@ -138,17 +151,32 @@ $result = $conn->query($sql);
                     <?php while($row = $result->fetch_assoc()): ?>
                         <tr>
                             <td>
-                                <strong><?= htmlspecialchars($row['project_name']) ?></strong>
+                                <div style="font-weight:bold; color:#1e293b;"><?= htmlspecialchars($row['project_name']) ?></div>
+                                <div class="text-muted" style="font-size:11px; margin-top:2px;">
+                                    ส่งเมื่อ: <?= date("d/m H:i", strtotime($row['created_at'])) ?>
+                                </div>
                             </td>
-                            <td><?= htmlspecialchars($row['requester_name']) ?></td>
-                            <td><?= date("d/m/Y H:i", strtotime($row['created_at'])) ?></td>
                             <td>
-                                <span class="badge bg-<?= $row['status'] ?>">
-                                    <?= ucfirst($row['status']) ?>
+                                <span class="course-tag"><?= htmlspecialchars($row['course_code']) ?></span>
+                                <div class="text-muted"><?= htmlspecialchars($row['course_name']) ?></div>
+                            </td>
+                            <td>
+                                <?= htmlspecialchars($row['requester_name']) ?>
+                            </td>
+                            <td>
+                                <?php if ($row['advisor_name']): ?>
+                                    <span class="advisor-text"><i class="fas fa-user-tie"></i> <?= htmlspecialchars($row['advisor_name']) ?></span>
+                                <?php else: ?>
+                                    <span class="text-muted">- ไม่มี -</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <span class="badge bg-<?= $row['req_status'] ?>">
+                                    <?= ucfirst($row['req_status']) ?>
                                 </span>
                             </td>
                             <td>
-                                <a href="admin_review_group.php?request_id=<?= $row['id'] ?>&group_id=<?= $row['group_id'] ?>" class="btn-review">
+                                <a href="admin_review_group.php?request_id=<?= $row['req_id'] ?>&group_id=<?= $row['group_id'] ?>" class="btn-review">
                                     <i class="fas fa-search"></i> ตรวจสอบ
                                 </a>
                             </td>

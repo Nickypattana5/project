@@ -5,6 +5,12 @@ include 'db_connect.php';
 $error = "";
 $success = "";
 
+// ถ้าล็อกอินอยู่แล้ว ให้เด้งไป Dashboard
+if (isset($_SESSION['user_id'])) {
+    header("Location: dashboard.php");
+    exit;
+}
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $first_name = trim($_POST['first_name']);
     $last_name = trim($_POST['last_name']);
@@ -17,11 +23,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // รวมชื่อเต็ม
     $fullname = $first_name . " " . $last_name;
 
-    // Validation เบื้องต้น
+    // Validation
     if ($password !== $confirm_password) {
         $error = "❌ รหัสผ่านไม่ตรงกัน";
     } else {
-        // เช็คข้อมูลซ้ำ (Username, Email, Student ID)
+        // ตรวจสอบข้อมูลซ้ำ (Username, Email, Student ID)
         $check = $conn->prepare("SELECT id FROM users WHERE username = ? OR email = ? OR student_id = ?");
         $check->bind_param("sss", $username, $email, $student_id);
         $check->execute();
@@ -29,14 +35,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if ($check->get_result()->num_rows > 0) {
             $error = "⚠️ ชื่อผู้ใช้, อีเมล หรือ รหัสนิสิตนี้ ถูกใช้งานแล้ว";
         } else {
-            // บันทึกข้อมูล
+            // บันทึกข้อมูล (Role = student เสมอ)
             $hashed = password_hash($password, PASSWORD_DEFAULT);
-            // role = student เสมอ
             $stmt = $conn->prepare("INSERT INTO users (username, password, fullname, student_id, email, role) VALUES (?, ?, ?, ?, ?, 'student')");
             $stmt->bind_param("sssss", $username, $hashed, $fullname, $student_id, $email);
 
             if ($stmt->execute()) {
-                // Auto Login เลย หรือจะส่งไปหน้า Login ก็ได้
+                // Auto Login หลังสมัครเสร็จ
                 $_SESSION['user_id'] = $stmt->insert_id;
                 $_SESSION['fullname'] = $fullname;
                 $_SESSION['role'] = 'student';

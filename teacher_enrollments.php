@@ -11,12 +11,20 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'teacher') {
 }
 
 $teacher_id = (int)$_SESSION['user_id'];
-
-// 🔥 แก้ไข: เพิ่มบรรทัดนี้เพื่อดึงชื่อ และกัน Error ถ้าไม่มีชื่อเก็บไว้
 $fullname = $_SESSION['fullname'] ?? 'Teacher'; 
-
 $msg = "";
 $msg_type = ""; 
+
+// 🔥 เคลียร์แจ้งเตือน "ขอลงทะเบียน" (enroll_request) ทันทีที่เข้ามาหน้านี้
+$clear_notif = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE receiver_id = ? AND type = 'enroll_request'");
+$clear_notif->bind_param("i", $teacher_id);
+$clear_notif->execute();
+
+// นับจำนวนแจ้งเตือนคำเชิญที่ปรึกษา (สำหรับ Sidebar)
+$count_advisor_invite = 0;
+$q3 = $conn->prepare("SELECT COUNT(*) FROM advisor_invites WHERE teacher_id = ? AND status = 'pending'");
+$q3->bind_param("i", $teacher_id); $q3->execute();
+$count_advisor_invite = $q3->get_result()->fetch_row()[0];
 
 // ---------- จัดการ POST อนุมัติ / ปฏิเสธ ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -66,18 +74,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $notif->bind_param("iis", $student_id, $teacher_id, $notif_msg);
             $notif->execute();
 
-            // 4. เคลียร์แจ้งเตือนอาจารย์
-            $clear_notif = $conn->prepare("
+            // 4. (กันเหนียว) เคลียร์แจ้งเตือนเฉพาะรายการนี้อีกรอบ
+            $clear_specific = $conn->prepare("
                 UPDATE notifications 
                 SET is_read = 1 
-                WHERE receiver_id = ? 
-                  AND sender_id = ? 
-                  AND type = 'enroll_request' 
-                  AND group_id = ? 
-                  AND is_read = 0
+                WHERE receiver_id = ? AND sender_id = ? AND type = 'enroll_request' AND group_id = ?
             ");
-            $clear_notif->bind_param("iii", $teacher_id, $student_id, $course_id);
-            $clear_notif->execute();
+            $clear_specific->bind_param("iii", $teacher_id, $student_id, $course_id);
+            $clear_specific->execute();
 
         } else {
             $msg = "เกิดข้อผิดพลาดในการบันทึกข้อมูล";
@@ -114,10 +118,10 @@ $rows = $stmt->get_result();
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ยืนยันการลงทะเบียน</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
+    /* Theme Dashboard */
     * { box-sizing: border-box; }
     body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6f9; color: #333; }
     .sidebar { width: 260px; height: 100vh; background: #1e3a8a; color: white; position: fixed; left: 0; top: 0; display: flex; flex-direction: column; z-index: 100; }
@@ -129,6 +133,7 @@ $rows = $stmt->get_result();
     .nav-links a:hover { background: rgba(255,255,255,0.1); color: white; border-left-color: #60a5fa; }
     .nav-links a.active { background: #2563eb; color: white; border-left-color: #fff; font-weight: bold; }
     .nav-links a i { width: 25px; text-align: center; margin-right: 10px; }
+    .menu-badge { background: #fbbf24; color: #1e3a8a; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-left: auto; font-weight: bold; }
     .logout-btn { margin: 20px; padding: 12px; text-align: center; background: #dc2626; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: 0.2s; }
     .logout-btn:hover { background: #b91c1c; }
     .main-content { margin-left: 260px; padding: 30px; }
@@ -165,11 +170,11 @@ $rows = $stmt->get_result();
         <p><?= htmlspecialchars($fullname) ?> <br> (Teacher)</p>
     </div>
     <div class="nav-links">
+        <a href="dashboard.php"><i class="fas fa-home"></i> แดชบอร์ด</a>
         <a href="manage_courses.php"><i class="fas fa-book"></i> จัดการรายวิชา</a>
         <a href="teacher_groups.php"><i class="fas fa-user-graduate"></i> กลุ่มที่ปรึกษา</a>
         <a href="teacher_enrollments.php" class="active"><i class="fas fa-tasks"></i> อนุมัติลงทะเบียน</a>
-        <a href="advisor_invitations.php"><i class="fas fa-envelope-open-text"></i> คำเชิญที่ปรึกษา</a>
-        <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
+        <a href="advisor_invitations.php"><i class="fas fa-envelope-open-text"></i> คำเชิญที่ปรึกษา <?php if ($count_advisor_invite > 0): ?><span class="menu-badge"><?= $count_advisor_invite ?></span><?php endif; ?></a>
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
 </div>

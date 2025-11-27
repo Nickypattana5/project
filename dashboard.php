@@ -30,7 +30,7 @@ $q1->bind_param("i", $user_id);
 $q1->execute();
 $count_general = $q1->get_result()->fetch_row()[0];
 
-// B. นับคำเชิญเข้ากลุ่ม (เฉพาะ Student) - เช็คงานค้าง
+// B. นับคำเชิญเข้ากลุ่ม (เฉพาะ Student)
 $count_invite = 0;
 if ($role == 'student') {
     $q2 = $conn->prepare("SELECT COUNT(*) FROM project_members WHERE student_id = ? AND is_confirmed = 0");
@@ -39,7 +39,7 @@ if ($role == 'student') {
     $count_invite = $q2->get_result()->fetch_row()[0];
 }
 
-// C. นับคำเชิญที่ปรึกษา (เฉพาะ Teacher) - เช็คงานค้าง
+// C. นับคำเชิญที่ปรึกษา (เฉพาะ Teacher)
 $count_advisor_invite = 0;
 if ($role == 'teacher') {
     $q3 = $conn->prepare("SELECT COUNT(*) FROM advisor_invites WHERE teacher_id = ? AND status = 'pending'");
@@ -55,7 +55,8 @@ $total_badge = $count_general + $count_invite + $count_advisor_invite;
 $sql_list = "
     SELECT n.*, 
            pm.is_confirmed AS student_confirmed,
-           ai.status AS advisor_status
+           ai.status AS advisor_status,
+           e.status AS enroll_status
     FROM notifications n
     LEFT JOIN project_members pm 
         ON n.group_id = pm.group_id 
@@ -65,6 +66,10 @@ $sql_list = "
         ON n.group_id = ai.group_id
         AND ai.teacher_id = n.receiver_id
         AND n.type = 'invite_advisor'
+    LEFT JOIN enrollments e 
+        ON n.group_id = e.course_id 
+        AND e.student_id = n.sender_id 
+        AND (n.type = 'enroll_request' OR n.type = 'drop_request')
     WHERE n.receiver_id = ? 
     ORDER BY n.created_at DESC 
     LIMIT 10
@@ -155,7 +160,7 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
 /* Popup Box */
 .notif-dropdown {
     display: none; position: absolute; right: 0; top: 50px;
-    width: 320px; background: white; border-radius: 12px;
+    width: 350px; background: white; border-radius: 12px;
     box-shadow: 0 10px 25px rgba(0,0,0,0.15); border: 1px solid #e2e8f0;
     z-index: 2000; overflow: hidden;
 }
@@ -169,18 +174,29 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
 .dropdown-header a { font-size: 12px; color: #2563eb; text-decoration: none; }
 
 .notif-list { max-height: 350px; overflow-y: auto; }
+
 .notif-item {
-    display: block; padding: 15px; border-bottom: 1px solid #f1f5f9;
-    text-decoration: none; color: #333; transition: 0.2s; position: relative;
+    display: flex; gap: 12px; padding: 15px; border-bottom: 1px solid #f1f5f9;
+    text-decoration: none; transition: 0.2s; 
+    background: #ffffff; color: #64748b; border-left: 4px solid transparent; 
 }
 .notif-item:hover { background: #f8fafc; }
-.notif-item.unread { background: #eff6ff; border-left: 3px solid #2563eb; }
 
-.notif-msg { font-size: 14px; margin-bottom: 5px; display: block; }
-.notif-time { font-size: 11px; color: #94a3b8; }
+.notif-item.unread {
+    background: #eff6ff; color: #1e293b; border-left-color: #2563eb; 
+}
+
+.notif-icon { margin-top: 2px; font-size: 10px; color: #cbd5e1; }
+.notif-item.unread .notif-icon { color: #2563eb; }
+
+.notif-content { flex: 1; }
+.notif-msg { font-size: 14px; margin-bottom: 4px; display: block; line-height: 1.4; }
+.notif-time { font-size: 11px; opacity: 0.7; display: block; }
+
 .action-tag {
-    display: inline-block; background: #fef3c7; color: #b45309;
-    font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 5px;
+    display: inline-block; background: #fff7ed; color: #c2410c;
+    font-size: 10px; padding: 2px 8px; border-radius: 10px; margin-left: 5px;
+    border: 1px solid #ffedd5; font-weight: 600;
 }
 
 /* Cards Grid */
@@ -216,7 +232,6 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
         <h2>🎓 ระบบนิสิต</h2>
         <p><?= htmlspecialchars($fullname) ?> <br> (<?= ucfirst($role) ?>)</p>
     </div>
-
     <div class="nav-links">
         <?php if ($role == 'admin'): ?>
             <a href="admin_approval_list.php"><i class="fas fa-clipboard-check"></i> อนุมัติโครงงาน</a>
@@ -281,7 +296,7 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
                     <?php if ($notif_res->num_rows > 0): ?>
                         <?php while ($n = $notif_res->fetch_assoc()): ?>
                             <?php
-                                // Link Router (Final Version)
+                                // Logic Link Router
                                 $type = $n['type'];
                                 $link = "#";
                                 $action_text = "";
@@ -298,21 +313,20 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
                                 elseif ($type == 'approval_result') {
                                     $link = "my_groups.php";
                                 } 
+                                // 🔥 แก้ไข: ชี้ไปหน้า approval list เหมือนเดิม
                                 elseif ($type == 'invite_admin') {
                                     $link = "admin_approval_list.php";
                                 }
                                 elseif ($type == 'enroll_request') {
                                     $link = "teacher_enrollments.php";
-                                    $action_text = "รออนุมัติ";
-                                    $is_pending_action = true;
+                                    if ($n['enroll_status'] == 'pending') { $is_pending_action = true; $action_text = "รออนุมัติ"; }
                                 }
                                 elseif ($type == 'enrollment_result') {
                                     $link = "my_courses.php";
                                 }
                                 elseif ($type == 'drop_request') {
                                     $link = "view_students.php?id=" . $n['group_id'];
-                                    $action_text = "รออนุมัติ";
-                                    $is_pending_action = true;
+                                    if ($n['enroll_status'] == 'drop_pending') { $is_pending_action = true; $action_text = "รออนุมัติ"; }
                                 }
                                 elseif ($type == 'drop_result') {
                                     $link = "my_courses.php";
@@ -323,7 +337,10 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
                             ?>
                             
                             <a href="<?= $link ?>" class="notif-item <?= $is_active ? 'unread' : '' ?>">
-                                <div style="flex:1">
+                                <div class="notif-icon">
+                                    <i class="fas fa-circle"></i>
+                                </div>
+                                <div class="notif-content">
                                     <span class="notif-msg">
                                         <?= htmlspecialchars($n['message']) ?>
                                         <?php if ($is_pending_action): ?>
@@ -386,6 +403,12 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
                 <h3>รออนุมัติหัวข้อ</h3>
                 <p>ตรวจสอบและอนุมัติหัวข้อโครงงานที่เสนอมา</p>
                 <a href="admin_approval_list.php" class="card-link">ไปตรวจสอบ <i class="fas fa-arrow-right"></i></a>
+            </div>
+            <div class="card">
+                <div class="card-icon"><i class="fas fa-comments"></i></div>
+                <h3>แชททั้งหมด</h3>
+                <p>ดูประวัติแชทของกลุ่มโครงงานต่างๆ</p>
+                <a href="admin_chat_list.php" class="card-link">ดูแชท <i class="fas fa-arrow-right"></i></a>
             </div>
             <div class="card">
                 <div class="card-icon"><i class="fas fa-cogs"></i></div>

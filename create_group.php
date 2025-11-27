@@ -1,4 +1,6 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 session_start();
 include 'db_connect.php';
 
@@ -12,20 +14,33 @@ $student_id = $_SESSION['user_id'];
 $fullname = $_SESSION['fullname'];
 $role = $_SESSION['role'];
 $msg = "";
+$msg_type = "";
 
-// 1. เช็คก่อนว่า "มีกลุ่มอยู่แล้วหรือยัง?"
-$check_group = $conn->prepare("SELECT COUNT(*) FROM project_members WHERE student_id = ?");
+// 1. ตรวจสิทธิ์ Project Access (สำหรับ Sidebar)
+$has_project_access = false;
+$q = $conn->prepare("SELECT 1 FROM enrollments WHERE student_id = ? AND status = 'approved' LIMIT 1");
+$q->bind_param("i", $student_id);
+$q->execute();
+if ($q->get_result()->num_rows > 0) $has_project_access = true;
+
+// นับจำนวนแจ้งเตือนสำหรับ Sidebar
+$count_invite = 0;
+$c_inv_q = $conn->prepare("SELECT COUNT(*) FROM project_members WHERE student_id = ? AND is_confirmed = 0");
+$c_inv_q->bind_param("i", $student_id); $c_inv_q->execute();
+$count_invite = $c_inv_q->get_result()->fetch_row()[0];
+
+// 2. เช็คก่อนว่า "มีกลุ่มอยู่แล้วหรือยัง?"
+$check_group = $conn->prepare("SELECT COUNT(*) FROM project_members WHERE student_id = ? AND is_confirmed = 1");
 $check_group->bind_param("i", $student_id);
 $check_group->execute();
 $has_group = $check_group->get_result()->fetch_row()[0];
 
 if ($has_group > 0) {
-    // ถ้ามีกลุ่มแล้ว ให้เด้งกลับไปหน้า my_groups พร้อมแจ้งเตือน
     header("Location: my_groups.php?msg=already_in_group");
     exit;
 }
 
-// 2. ดึงรายวิชาที่นิสิต "ลงทะเบียนและผ่านการอนุมัติแล้ว" เท่านั้น
+// 3. ดึงรายวิชาที่นิสิต "ลงทะเบียนและผ่านการอนุมัติแล้ว" เท่านั้น
 $course_sql = "
     SELECT c.id, c.course_code, c.course_name 
     FROM enrollments e
@@ -37,15 +52,16 @@ $course_stmt->bind_param("i", $student_id);
 $course_stmt->execute();
 $my_courses = $course_stmt->get_result();
 
-// 3. จัดการการส่งฟอร์ม (POST)
+// 4. จัดการการส่งฟอร์ม (POST)
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $project_name = trim($_POST['project_name']);
     $course_id = intval($_POST['course_id']);
     
     if (empty($project_name) || empty($course_id)) {
         $msg = "⚠️ กรุณากรอกชื่อโครงงานและเลือกรายวิชา";
+        $msg_type = "warning";
     } else {
-        // เริ่ม Transaction (เพื่อให้ข้อมูลเข้าพร้อมกันทุกตาราง)
+        // เริ่ม Transaction
         $conn->begin_transaction();
 
         try {
@@ -56,11 +72,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $new_group_id = $stmt1->insert_id;
 
             // B. เพิ่มสมาชิก (ตัวเองเป็นหัวหน้า)
-            $stmt2 = $conn->prepare("INSERT INTO project_members (group_id, student_id, is_leader, is_confirmed, invited_by) VALUES (?, ?, 1, 1, ?)");
+            $stmt2 = $conn->prepare("INSERT INTO project_members (group_id, student_id, is_leader, is_confirmed, invited_by, joined_at) VALUES (?, ?, 1, 1, ?, NOW())");
             $stmt2->bind_param("iii", $new_group_id, $student_id, $student_id);
             $stmt2->execute();
 
-            // C. อัปโหลดไฟล์ (ถ้ามี)
+            // C. อัปโหลดไฟล์ Proposal (ถ้ามี)
             if (!empty($_FILES['project_file']['name'])) {
                 $dir = "uploads/projects/";
                 if (!is_dir($dir)) mkdir($dir, 0777, true);
@@ -75,14 +91,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
             }
 
-            // Commit ข้อมูล
             $conn->commit();
+            // ไปหน้า my_groups ทันทีหลังสร้างเสร็จ
             header("Location: my_groups.php?msg=group_created");
             exit;
 
         } catch (Exception $e) {
             $conn->rollback();
             $msg = "❌ เกิดข้อผิดพลาด: " . $e->getMessage();
+            $msg_type = "danger";
         }
     }
 }
@@ -93,72 +110,88 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <head>
 <meta charset="UTF-8">
 <title>สร้างกลุ่มโครงงานใหม่</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
     /* Theme Dashboard */
+    * { box-sizing: border-box; }
     body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6f9; color: #333; }
     
     /* Sidebar */
-    .sidebar { width: 250px; height: 100vh; background: #1e3a8a; color: white; position: fixed; left: 0; top: 0; padding-top: 20px; z-index: 100; }
-    .sidebar h2 { text-align: center; margin-bottom: 30px; font-size: 22px; }
-    .sidebar a { display: block; padding: 12px 20px; color: white; text-decoration: none; font-size: 15px; transition: 0.2s; border-left: 4px solid transparent; }
-    .sidebar a:hover { background: #3b82f6; border-left-color: #fff; }
-    .logout { margin-top: 30px; display: inline-block; background: #dc2626; color: white; padding: 10px 15px; border-radius: 6px; text-decoration: none; margin-left: 20px; width: 180px; text-align: center; }
+    .sidebar { width: 260px; height: 100vh; background: #1e3a8a; color: white; position: fixed; left: 0; top: 0; display: flex; flex-direction: column; z-index: 100; }
+    .sidebar-header { padding: 20px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .sidebar-header h2 { margin: 0; font-size: 20px; font-weight: bold; }
+    .sidebar-header p { margin: 5px 0 0; font-size: 13px; opacity: 0.8; }
+    .nav-links { flex: 1; padding: 20px 0; overflow-y: auto; }
+    .nav-links a { display: flex; align-items: center; padding: 12px 25px; color: rgba(255,255,255,0.8); text-decoration: none; font-size: 15px; transition: 0.2s; border-left: 4px solid transparent; }
+    .nav-links a:hover { background: rgba(255,255,255,0.1); color: white; border-left-color: #60a5fa; }
+    .nav-links a.active { background: #2563eb; color: white; border-left-color: #fff; font-weight: bold; }
+    .nav-links a i { width: 25px; text-align: center; margin-right: 10px; }
+    .menu-badge { background: #fbbf24; color: #1e3a8a; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-left: auto; font-weight: bold; }
+    .logout-btn { margin: 20px; padding: 12px; text-align: center; background: #dc2626; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: 0.2s; }
+    .logout-btn:hover { background: #b91c1c; }
 
-    /* Content */
-    .content { margin-left: 260px; padding: 40px; display: flex; justify-content: center; }
+    /* Main Content */
+    .main-content { margin-left: 260px; padding: 40px; display: flex; justify-content: center; }
 
     /* Form Card */
     .form-card {
         background: white; width: 100%; max-width: 600px;
         padding: 40px; border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;
     }
-    .form-header { text-align: center; margin-bottom: 30px; }
+    .form-header { text-align: center; margin-bottom: 30px; border-bottom: 1px solid #f1f5f9; padding-bottom: 20px; }
     .form-header h1 { margin: 0; color: #1e3a8a; font-size: 24px; }
-    .form-header p { color: #666; margin-top: 5px; }
+    .form-header p { color: #64748b; margin-top: 5px; font-size: 14px; }
 
     /* Input Styles */
     .form-group { margin-bottom: 20px; }
-    .form-label { display: block; font-weight: 600; margin-bottom: 8px; color: #333; }
+    .form-label { display: block; font-weight: 600; margin-bottom: 8px; color: #475569; font-size: 14px; }
     .form-control {
-        width: 100%; padding: 12px; border: 1px solid #ddd;
-        border-radius: 8px; font-size: 14px; box-sizing: border-box;
-        transition: 0.3s;
+        width: 100%; padding: 12px; border: 1px solid #cbd5e1;
+        border-radius: 8px; font-size: 14px; box-sizing: border-box; transition: 0.2s;
     }
     .form-control:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
     
     /* File Upload */
-    .file-input-wrapper { border: 2px dashed #ddd; padding: 20px; text-align: center; border-radius: 8px; cursor: pointer; background: #fafafa; }
-    .file-input-wrapper:hover { border-color: #3b82f6; background: #f0f7ff; }
+    .file-input-wrapper { border: 2px dashed #cbd5e1; padding: 20px; text-align: center; border-radius: 8px; cursor: pointer; background: #f8fafc; transition: 0.2s; }
+    .file-input-wrapper:hover { border-color: #3b82f6; background: #eff6ff; }
+
+    /* Alert */
+    .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; font-size: 14px; }
+    .alert-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .alert-warning { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; }
 
     /* Buttons */
     .btn-group { display: flex; gap: 10px; margin-top: 30px; }
-    .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; text-decoration: none; text-align: center; }
+    .btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; text-decoration: none; text-align: center; transition: 0.2s; }
     .btn-submit { background: #10b981; color: white; }
     .btn-submit:hover { background: #059669; }
-    .btn-cancel { background: #e5e7eb; color: #374151; }
-    .btn-cancel:hover { background: #d1d5db; }
-
-    .msg-error { background: #fee2e2; color: #991b1b; padding: 10px; border-radius: 6px; margin-bottom: 20px; text-align: center; border: 1px solid #fecaca; }
+    .btn-cancel { background: #e2e8f0; color: #475569; }
+    .btn-cancel:hover { background: #cbd5e1; }
 
 </style>
 </head>
 <body>
 
 <div class="sidebar">
-    <h2>📘 ระบบนิสิต</h2>
-    <p style="text-align:center; font-size:13px; opacity:0.8; margin-bottom:20px;">
-        <?= htmlspecialchars($fullname) ?><br>(Student)
-    </p>
-    <hr style="border-color:rgba(255,255,255,0.1); width:80%; margin: 0 auto 10px auto;">
-
-    <a href="dashboard.php">🏠 แดชบอร์ด</a>
-    <a href="enroll_course.php">📝 ลงทะเบียนเรียน</a>
-    <a href="my_courses.php">📚 วิชาที่ลงทะเบียน</a>
-    <a href="my_groups.php">👥 กลุ่มโครงงาน</a> <a href="logout.php" class="logout">🚪 ออกจากระบบ</a>
+    <div class="sidebar-header">
+        <h2>🎓 ระบบนิสิต</h2>
+        <p><?= htmlspecialchars($fullname) ?><br>(Student)</p>
+    </div>
+    <div class="nav-links">
+        <a href="dashboard.php"><i class="fas fa-home"></i> แดชบอร์ด</a>
+        <a href="enroll_course.php"><i class="fas fa-book-open"></i> ลงทะเบียนเรียน</a>
+        <a href="my_courses.php"><i class="fas fa-list"></i> วิชาที่ลงทะเบียน</a>
+        <?php if ($has_project_access): ?>
+            <a href="my_groups.php"><i class="fas fa-users"></i> กลุ่มโครงงาน</a> <?php if ($count_invite > 0): ?>
+                <a href="invitations.php"><i class="fas fa-envelope"></i> คำเชิญเข้ากลุ่ม <span class="menu-badge"><?= $count_invite ?></span></a>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+    <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
 </div>
 
-<div class="content">
+<div class="main-content">
 
     <div class="form-card">
         <div class="form-header">
@@ -167,7 +200,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         </div>
 
         <?php if ($msg): ?>
-            <div class="msg-error"><?= $msg ?></div>
+            <div class="alert alert-<?= $msg_type ?>"><?= $msg ?></div>
         <?php endif; ?>
 
         <form method="POST" enctype="multipart/form-data">
@@ -191,14 +224,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <option value="" disabled>คุณยังไม่มีวิชาที่อนุมัติให้ลงทะเบียน</option>
                     <?php endif; ?>
                 </select>
-                <small style="color:#666; font-size:12px;">* แสดงเฉพาะวิชาที่คุณลงทะเบียนผ่านแล้วเท่านั้น</small>
+                <small style="color:#64748b; font-size:12px;">* แสดงเฉพาะวิชาที่คุณลงทะเบียนผ่านแล้วเท่านั้น</small>
             </div>
 
             <div class="form-group">
                 <label class="form-label">อัปโหลดไฟล์ Proposal (PDF/Word)</label>
-                <div class="file-input-wrapper">
-                    <input type="file" name="project_file" accept=".pdf,.doc,.docx" style="width:100%">
-                    <p style="margin:5px 0 0 0; font-size:12px; color:#888;">(ถ้ามี) ขนาดไม่เกิน 10MB</p>
+                <div class="file-input-wrapper" onclick="document.getElementById('fileInput').click()">
+                    <input type="file" id="fileInput" name="project_file" accept=".pdf,.doc,.docx" style="display:none" onchange="document.getElementById('fileName').innerText = this.files[0].name">
+                    <i class="fas fa-cloud-upload-alt" style="font-size: 24px; color: #cbd5e1; margin-bottom: 5px;"></i><br>
+                    <span id="fileName" style="color:#64748b; font-size:14px;">คลิกเพื่อเลือกไฟล์ (ขนาดไม่เกิน 10MB)</span>
                 </div>
             </div>
 

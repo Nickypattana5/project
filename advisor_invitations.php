@@ -8,10 +8,15 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'teacher') {
     exit;
 }
 
-$teacher_id = $_SESSION['user_id'];
+$teacher_id = (int)$_SESSION['user_id'];
 $fullname = $_SESSION['fullname'];
 $msg = "";
-$msg_type = ""; // success, danger
+$msg_type = ""; // success, danger, warning
+
+// 🔥 เคลียร์แจ้งเตือน "คำเชิญที่ปรึกษา" (invite_advisor) ทันทีที่เข้ามาหน้านี้
+$clear_notif = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE receiver_id = ? AND type = 'invite_advisor'");
+$clear_notif->bind_param("i", $teacher_id);
+$clear_notif->execute();
 
 // รับ/ปฏิเสธคำเชิญ
 if (isset($_GET['action'], $_GET['invite_id'])) {
@@ -33,7 +38,7 @@ if (isset($_GET['action'], $_GET['invite_id'])) {
         $msg_type = "warning";
     } else {
         if ($action === 'accept') {
-            // ตั้ง advisor_id
+            // ตั้ง advisor_id ให้กลุ่ม
             $upd = $conn->prepare("UPDATE project_groups SET advisor_id = ? WHERE id = ?");
             $upd->bind_param("ii", $teacher_id, $invite['group_id']);
             if ($upd->execute()) {
@@ -53,7 +58,7 @@ if (isset($_GET['action'], $_GET['invite_id'])) {
             $d->bind_param("i", $invite_id);
             $d->execute();
             $msg = "❌ ปฏิเสธคำเชิญเรียบร้อยแล้ว";
-            $msg_type = "warning"; // ใช้สีเหลือง/ส้ม ให้ดูซอฟต์กว่า error
+            $msg_type = "warning";
         }
     }
 }
@@ -80,10 +85,10 @@ $invites = $stmt->get_result();
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>คำเชิญเป็นที่ปรึกษา</title>
+<title>คำเชิญให้เป็นที่ปรึกษา</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-    /* Global Theme */
+    /* Theme Dashboard */
     * { box-sizing: border-box; }
     body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6f9; color: #333; }
 
@@ -102,7 +107,6 @@ $invites = $stmt->get_result();
 
     /* Main Content */
     .main-content { margin-left: 260px; padding: 30px; }
-    
     .page-header { margin-bottom: 25px; }
     .page-header h1 { margin: 0; font-size: 24px; color: #1e3a8a; }
 
@@ -110,7 +114,7 @@ $invites = $stmt->get_result();
     .alert { padding: 15px; border-radius: 8px; margin-bottom: 25px; display: flex; align-items: center; gap: 10px; font-size: 14px; }
     .alert-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
     .alert-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
-    .alert-warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    .alert-warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
 
     /* Grid Layout */
     .grid-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
@@ -139,7 +143,7 @@ $invites = $stmt->get_result();
     .detail-row:last-child { margin-bottom: 0; }
 
     .btn-group { display: flex; gap: 10px; margin-top: auto; }
-    .btn { flex: 1; padding: 10px; text-align: center; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; transition: 0.2s; border: none; cursor: pointer; }
+    .btn { flex: 1; padding: 10px; text-align: center; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; transition: 0.2s; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
     
     .btn-accept { background: #10b981; color: white; }
     .btn-accept:hover { background: #059669; }
@@ -147,7 +151,7 @@ $invites = $stmt->get_result();
     .btn-decline { background: white; color: #ef4444; border: 1px solid #fca5a5; }
     .btn-decline:hover { background: #fef2f2; }
 
-    .empty-state { text-align: center; padding: 60px; color: #94a3b8; }
+    .empty-state { text-align: center; padding: 60px; color: #94a3b8; grid-column: 1 / -1; }
     .empty-state i { font-size: 48px; margin-bottom: 15px; display: block; color: #cbd5e1; }
 </style>
 </head>
@@ -159,11 +163,11 @@ $invites = $stmt->get_result();
         <p><?= htmlspecialchars($fullname) ?> <br> (Teacher)</p>
     </div>
     <div class="nav-links">
+        <a href="dashboard.php"><i class="fas fa-home"></i> แดชบอร์ด</a>
         <a href="manage_courses.php"><i class="fas fa-book"></i> จัดการรายวิชา</a>
         <a href="teacher_groups.php"><i class="fas fa-user-graduate"></i> กลุ่มที่ปรึกษา</a>
         <a href="teacher_enrollments.php"><i class="fas fa-tasks"></i> อนุมัติลงทะเบียน</a>
         <a href="advisor_invitations.php" class="active"><i class="fas fa-envelope-open-text"></i> คำเชิญที่ปรึกษา</a>
-        <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
 </div>
@@ -216,7 +220,7 @@ $invites = $stmt->get_result();
                 </div>
             <?php endwhile; ?>
         <?php else: ?>
-            <div class="empty-state" style="grid-column: 1 / -1;">
+            <div class="empty-state">
                 <i class="fas fa-inbox"></i>
                 <h3>ยังไม่มีคำเชิญใหม่</h3>
                 <p>เมื่อมีนิสิตส่งคำเชิญมา รายการจะปรากฏที่นี่ครับ</p>

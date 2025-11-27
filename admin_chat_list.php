@@ -10,11 +10,15 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 
 $fullname = $_SESSION['fullname'];
 
-// ดึงข้อมูลกลุ่มทั้งหมด
+// ดึงข้อมูลกลุ่มทั้งหมด (เรียงจากล่าสุด)
 $sql = "
-    SELECT g.id, g.project_name, g.status, c.course_code, c.course_name
+    SELECT 
+        g.id, g.project_name, g.status, g.created_at,
+        c.course_code, c.course_name,
+        u.fullname AS advisor_name
     FROM project_groups g
     LEFT JOIN courses c ON g.course_id = c.id
+    LEFT JOIN users u ON g.advisor_id = u.id
     ORDER BY g.created_at DESC
 ";
 $q = $conn->query($sql);
@@ -63,21 +67,22 @@ $q = $conn->query($sql);
     tr:hover { background: #f8fafc; }
 
     /* Status Badge */
-    .badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block; text-transform: uppercase; }
+    .badge { padding: 5px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; display: inline-block; text-transform: uppercase; }
     .bg-draft { background: #f3f4f6; color: #374151; }
-    .bg-pending { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+    .bg-pending { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
     .bg-approved { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
     .bg-rejected { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 
     /* Course Info */
-    .course-info { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .course-tag { background: #eff6ff; color: #2563eb; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .text-muted { color: #94a3b8; font-size: 12px; }
 
     /* Button */
     .btn-chat { 
-        padding: 8px 16px; background: #2563eb; color: white; border-radius: 6px; 
+        padding: 8px 16px; background: #e0f2fe; color: #0284c7; border-radius: 6px; 
         text-decoration: none; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; transition: 0.2s; 
     }
-    .btn-chat:hover { background: #1d4ed8; }
+    .btn-chat:hover { background: #bae6fd; }
 
     .empty-state { text-align: center; padding: 50px; color: #94a3b8; }
     .empty-state i { font-size: 48px; margin-bottom: 15px; display: block; color: #cbd5e1; }
@@ -110,8 +115,8 @@ $q = $conn->query($sql);
             <table>
                 <thead>
                     <tr>
-                        <th>ชื่อโครงงาน</th>
-                        <th>รายวิชา</th>
+                        <th>ชื่อโครงงาน / รายวิชา</th>
+                        <th>อาจารย์ที่ปรึกษา</th>
                         <th width="15%">สถานะ</th>
                         <th width="15%">จัดการ</th>
                     </tr>
@@ -120,11 +125,16 @@ $q = $conn->query($sql);
                     <?php while($g = $q->fetch_assoc()): ?>
                         <tr>
                             <td>
-                                <strong><?= htmlspecialchars($g['project_name']) ?></strong>
+                                <strong><?= htmlspecialchars($g['project_name']) ?></strong><br>
+                                <span class="course-tag"><?= htmlspecialchars($g['course_code']) ?></span> 
+                                <span class="text-muted"><?= htmlspecialchars($g['course_name']) ?></span>
                             </td>
                             <td>
-                                <div><?= htmlspecialchars($g['course_code']) ?></div>
-                                <div class="course-info"><?= htmlspecialchars($g['course_name']) ?></div>
+                                <?php if($g['advisor_name']): ?>
+                                    <i class="fas fa-user-tie text-muted"></i> <?= htmlspecialchars($g['advisor_name']) ?>
+                                <?php else: ?>
+                                    <span class="text-muted">-</span>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <span class="badge bg-<?= $g['status'] ?>">

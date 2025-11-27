@@ -10,15 +10,15 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
 
 $fullname = $_SESSION['fullname'];
 $msg = "";
-$msg_type = ""; // success, danger
+$msg_type = ""; // success, danger, warning
 
 // บันทึกข้อมูล
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $username = trim($_POST['username']);
-    $t_fullname = trim($_POST['fullname']); // เปลี่ยนชื่อตัวแปรกันซ้ำกับ session
+    $t_fullname = trim($_POST['fullname']);
     $password = trim($_POST['password']);
     $confirm_pwd = trim($_POST['confirm_password']);
-    $email = trim($_POST['email']); // เพิ่มช่องอีเมล (ถ้ามีใน db)
+    $email = trim($_POST['email']);
 
     if ($password !== $confirm_pwd) {
         $msg = "❌ รหัสผ่านไม่ตรงกัน";
@@ -35,7 +35,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         } else {
             $hashed_password = password_hash($password, PASSWORD_DEFAULT);
             
-            // Insert (รองรับ email ถ้าตารางมี column email)
+            // Insert
             $stmt = $conn->prepare("INSERT INTO users (username, password, fullname, email, role) VALUES (?, ?, ?, ?, 'teacher')");
             $stmt->bind_param("ssss", $username, $hashed_password, $t_fullname, $email);
 
@@ -109,10 +109,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     /* Buttons */
     .btn-group { display: flex; gap: 10px; margin-top: 30px; }
-    .btn { flex: 1; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; border: none; transition: 0.2s; }
+    .btn { flex: 1; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; border: none; transition: 0.2s; text-decoration: none; text-align: center; }
     .btn-submit { background: #10b981; color: white; }
     .btn-submit:hover { background: #059669; }
-    .btn-cancel { background: #e2e8f0; color: #475569; text-decoration: none; text-align: center; display: block; }
+    .btn-cancel { background: #e2e8f0; color: #475569; }
     .btn-cancel:hover { background: #cbd5e1; }
 
 </style>
@@ -125,9 +125,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <p><?= htmlspecialchars($fullname) ?> <br> (Admin)</p>
     </div>
     <div class="nav-links">
-        <a href="admin_approval_list.php"><i class="fas fa-clipboard-check"></i> อนุมัติโครงงาน</a>
-        <a href="admin_chat_list.php"><i class="fas fa-comments"></i> แชททั้งหมด</a>
-        <a href="list_teachers.php"><i class="fas fa-chalkboard-teacher"></i> จัดการอาจารย์</a>
+        <a href="admin_project_list.php"><i class="fas fa-layer-group"></i> จัดการโครงงาน</a>
+        <a href="list_teachers.php" class="active"><i class="fas fa-chalkboard-teacher"></i> จัดการอาจารย์</a>
         <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
