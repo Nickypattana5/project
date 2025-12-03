@@ -138,7 +138,6 @@ $result = $conn->query("SELECT id, username, fullname, created_at, email FROM us
             <table>
                 <thead>
                     <tr>
-                        <th width="10%">ID</th>
                         <th>ชื่อ-นามสกุล</th>
                         <th>ชื่อผู้ใช้ (Username)</th>
                         <th>วันที่เพิ่ม</th>
@@ -148,7 +147,6 @@ $result = $conn->query("SELECT id, username, fullname, created_at, email FROM us
                 <tbody>
                     <?php while ($row = $result->fetch_assoc()): ?>
                         <tr>
-                            <td>#<?= $row['id'] ?></td>
                             <td>
                                 <div class="teacher-info">
                                     <div class="avatar"><?= mb_substr($row['fullname'], 0, 1) ?></div>
