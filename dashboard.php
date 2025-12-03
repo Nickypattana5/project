@@ -11,11 +11,23 @@ $role = $_SESSION['role'];
 $fullname = $_SESSION['fullname'];
 $user_id = $_SESSION['user_id'];
 
+// 🔥 [เพิ่มใหม่] ดึงรหัสนิสิตมาแสดง (ถ้าเป็น Student)
+$student_code = "";
+if ($role == 'student') {
+    $q_sid = $conn->prepare("SELECT student_id FROM users WHERE id = ?");
+    $q_sid->bind_param("i", $user_id);
+    $q_sid->execute();
+    $res_sid = $q_sid->get_result()->fetch_assoc();
+    if ($res_sid) {
+        $student_code = $res_sid['student_id'];
+    }
+}
+
 /* ===============================
    1. จัดการระบบแจ้งเตือน (Notification Logic)
    =============================== */
 
-// เคลียร์แจ้งเตือน (อ่านทั้งหมด - เฉพาะข่าวทั่วไป)
+// เคลียร์แจ้งเตือน (อ่านทั้งหมด - เฉพาะข่าวทั่วไปที่ไม่ใช่งานค้าง)
 if (isset($_GET['read_all'])) {
     $upd = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE receiver_id = ? AND type != 'invite_group'");
     $upd->bind_param("i", $user_id);
@@ -30,7 +42,7 @@ $q1->bind_param("i", $user_id);
 $q1->execute();
 $count_general = $q1->get_result()->fetch_row()[0];
 
-// B. นับคำเชิญเข้ากลุ่ม (เฉพาะ Student)
+// B. นับคำเชิญเข้ากลุ่ม (เฉพาะ Student) - งานค้าง
 $count_invite = 0;
 if ($role == 'student') {
     $q2 = $conn->prepare("SELECT COUNT(*) FROM project_members WHERE student_id = ? AND is_confirmed = 0");
@@ -39,7 +51,7 @@ if ($role == 'student') {
     $count_invite = $q2->get_result()->fetch_row()[0];
 }
 
-// C. นับคำเชิญที่ปรึกษา (เฉพาะ Teacher)
+// C. นับคำเชิญที่ปรึกษา (เฉพาะ Teacher) - งานค้าง
 $count_advisor_invite = 0;
 if ($role == 'teacher') {
     $q3 = $conn->prepare("SELECT COUNT(*) FROM advisor_invites WHERE teacher_id = ? AND status = 'pending'");
@@ -52,6 +64,7 @@ if ($role == 'teacher') {
 $total_badge = $count_general + $count_invite + $count_advisor_invite;
 
 // D. ดึงรายการแจ้งเตือน 10 รายการล่าสุด
+// JOIN ตารางอื่นๆ เพื่อเช็คสถานะงานค้าง (Pending Status)
 $sql_list = "
     SELECT n.*, 
            pm.is_confirmed AS student_confirmed,
@@ -175,6 +188,7 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
 
 .notif-list { max-height: 350px; overflow-y: auto; }
 
+/* Notification Items */
 .notif-item {
     display: flex; gap: 12px; padding: 15px; border-bottom: 1px solid #f1f5f9;
     text-decoration: none; transition: 0.2s; 
@@ -236,7 +250,7 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
         <?php if ($role == 'admin'): ?>
             <a href="admin_approval_list.php"><i class="fas fa-clipboard-check"></i> อนุมัติโครงงาน</a>
             <a href="admin_chat_list.php"><i class="fas fa-comments"></i> แชททั้งหมด</a>
-            <a href="list_teachers.php"><i class="fas fa-chalkboard-teacher"></i> จัดการอาจารย์</a>
+            <a href="list_teachers.php"><i class="fas fa-chalkboard-teacher"></i> รายชื่ออาจารย์ทั้งหมด</a>
         <?php endif; ?>
 
         <?php if ($role == 'student'): ?>
@@ -270,12 +284,15 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
 </div>
 
 <div class="main-content">
-    
     <div class="top-bar">
         <div class="welcome-msg">
-            <h1>👋 สวัสดี, <?= htmlspecialchars($fullname) ?></h1>
+            <h1>
+                👋 สวัสดี, <?= htmlspecialchars($fullname) ?>
+                <?php if ($student_code): ?>
+                    <span style="color: #64748b; font-size: 0.8em; margin-left: 10px;">(<?= htmlspecialchars($student_code) ?>)</span>
+                <?php endif; ?>
+            </h1>
         </div>
-
         <div class="notif-wrapper">
             <div class="notif-btn" onclick="toggleNotif()">
                 <i class="fas fa-bell"></i>
@@ -296,12 +313,12 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
                     <?php if ($notif_res->num_rows > 0): ?>
                         <?php while ($n = $notif_res->fetch_assoc()): ?>
                             <?php
-                                // Logic Link Router
                                 $type = $n['type'];
                                 $link = "#";
                                 $action_text = "";
                                 $is_pending_action = false;
 
+                                // Logic Link Router
                                 if ($type == 'invite_advisor') {
                                     $link = "advisor_invitations.php";
                                     if ($n['advisor_status'] == 'pending') { $is_pending_action = true; $action_text = "รอตอบรับ"; }
@@ -313,7 +330,6 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #f4f6
                                 elseif ($type == 'approval_result') {
                                     $link = "my_groups.php";
                                 } 
-                                // 🔥 แก้ไข: ชี้ไปหน้า approval list เหมือนเดิม
                                 elseif ($type == 'invite_admin') {
                                     $link = "admin_approval_list.php";
                                 }

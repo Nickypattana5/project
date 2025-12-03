@@ -177,11 +177,12 @@ $result = $stmt->get_result();
         <p><?= htmlspecialchars($fullname) ?> <br> (Teacher)</p>
     </div>
     <div class="nav-links">
+        <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
         <a href="manage_courses.php" class="active"><i class="fas fa-book"></i> จัดการรายวิชา</a>
         <a href="teacher_groups.php"><i class="fas fa-user-graduate"></i> กลุ่มที่ปรึกษา</a>
         <a href="teacher_enrollments.php"><i class="fas fa-tasks"></i> อนุมัติลงทะเบียน</a>
         <a href="advisor_invitations.php"><i class="fas fa-envelope-open-text"></i> คำเชิญที่ปรึกษา <?php if ($count_advisor_invite > 0): ?><span class="menu-badge"><?= $count_advisor_invite ?></span><?php endif; ?></a>
-        <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
+
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
 </div>

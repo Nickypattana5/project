@@ -4,7 +4,6 @@ ini_set('display_errors', 1);
 session_start();
 include 'db_connect.php';
 
-// ตรวจล็อกอิน
 if (!isset($_SESSION['user_id'])) { header("Location: login.php"); exit; }
 
 $user_id = (int)$_SESSION['user_id'];
@@ -12,26 +11,25 @@ $fullname = $_SESSION['fullname'];
 $role = $_SESSION['role'] ?? 'student';
 $group_id = intval($_GET['id'] ?? 0);
 
-// channel: 'group' หรือ 'admin'
+// Channel
 $channel = $_GET['channel'] ?? 'group';
 $valid = ['group','admin'];
 if (!in_array($channel, $valid)) $channel = 'group';
 
-// 1. ดึงข้อมูลกลุ่ม + อาจารย์ + ชื่อวิชา
+// 1. โหลดข้อมูล
 $stmt = $conn->prepare("
     SELECT g.*, u.fullname AS advisor_name, c.course_name, c.course_code
     FROM project_groups g
     LEFT JOIN users u ON g.advisor_id = u.id
     LEFT JOIN courses c ON g.course_id = c.id
-    WHERE g.id = ?
-    LIMIT 1
+    WHERE g.id = ? LIMIT 1
 ");
 $stmt->bind_param("i", $group_id);
 $stmt->execute();
 $group = $stmt->get_result()->fetch_assoc();
 if (!$group) die("❌ ไม่พบข้อมูลกลุ่ม");
 
-// 2. ตรวจสิทธิ์เข้าถึง
+// 2. ตรวจสิทธิ์
 $allow = false;
 if ($role === 'teacher' && $group['advisor_id'] == $user_id) $allow = true;
 elseif ($role === 'admin') $allow = true;
@@ -43,45 +41,25 @@ else {
 }
 if (!$allow) die("❌ คุณไม่มีสิทธิ์เข้ากลุ่มนี้");
 
-// 3. ดึงสมาชิกในกลุ่ม
-$members = $conn->prepare("
-    SELECT u.id, u.fullname, m.is_leader
-    FROM project_members m
-    JOIN users u ON m.student_id = u.id
-    WHERE m.group_id = ? AND m.is_confirmed = 1
-    ORDER BY m.is_leader DESC, m.joined_at ASC
-");
+// 3. สมาชิก
+$members = $conn->prepare("SELECT u.id, u.fullname, m.is_leader FROM project_members m JOIN users u ON m.student_id = u.id WHERE m.group_id = ? AND m.is_confirmed = 1 ORDER BY m.is_leader DESC, m.joined_at ASC");
 $members->bind_param("i", $group_id);
 $members->execute();
 $member_result = $members->get_result();
 
-// 4. โหลดข้อความแชท
-$chats = $conn->prepare("
-    SELECT c.*, u.fullname, u.role
-    FROM project_chat c
-    JOIN users u ON c.sender_id = u.id
-    WHERE c.group_id = ? AND c.channel = ?
-    ORDER BY c.created_at ASC
-");
+// 4. แชท
+$chats = $conn->prepare("SELECT c.*, u.fullname, u.role FROM project_chat c JOIN users u ON c.sender_id = u.id WHERE c.group_id = ? AND c.channel = ? ORDER BY c.created_at ASC");
 $chats->bind_param("is", $group_id, $channel);
 $chats->execute();
 $chat_result = $chats->get_result();
 
-// 5. โหลดไฟล์ทั้งหมด (สำหรับ Dropdown)
-$files_q = $conn->prepare("
-    SELECT c.file_path, c.created_at, u.fullname
-    FROM project_chat c
-    JOIN users u ON c.sender_id = u.id
-    WHERE c.group_id = ? AND c.channel = ? 
-      AND c.file_path IS NOT NULL 
-      AND c.file_path != ''
-    ORDER BY c.created_at DESC
-");
+// 5. ไฟล์ (Dropdown)
+$files_q = $conn->prepare("SELECT c.file_path, c.created_at, u.fullname FROM project_chat c JOIN users u ON c.sender_id = u.id WHERE c.group_id = ? AND c.channel = ? AND c.file_path IS NOT NULL AND c.file_path != '' ORDER BY c.created_at DESC");
 $files_q->bind_param("is", $group_id, $channel);
 $files_q->execute();
 $all_files = $files_q->get_result();
 
-// 6. Logic สถานะ (ล็อคแชท / ปุ่มขออนุมัติ)
+// 6. Logic สถานะ (ตรวจสอบสิทธิ์การส่งข้อความ)
 $can_send = true;
 $lock_text = "";
 $req_status = null;
@@ -96,33 +74,53 @@ if ($r_res) {
     $admin_note = $r_res['note'];
 }
 
-// กฎห้องแชทกลุ่ม
+// --- 🟢 กฎห้องแชทกลุ่ม ---
 if ($channel === 'group') {
+    // 1. Approved -> ปิดถาวร
     if ($group['status'] === 'approved') {
         $can_send = false;
         $lock_text = "🔒 โครงงานอนุมัติแล้ว: แชทกลุ่มถูกปิด";
     }
-    // แอดมินห้ามพิมพ์ในห้องกลุ่ม (View Only)
+    // 2. 🔥 Pending (รอตรวจสอบ) -> ปิดแชทกลุ่มชั่วคราว (ให้ไปคุยในแชทแอดมิน)
+    elseif ($group['status'] === 'pending') {
+        $can_send = false;
+        $lock_text = "⏳ อยู่ระหว่างการตรวจสอบ: แชทกลุ่มถูกระงับชั่วคราว (กรุณาคุยในแชทแอดมิน)";
+    }
+    
+    // 3. Admin -> ดูได้อย่างเดียวเสมอ
     if ($role === 'admin') {
         $can_send = false;
         $lock_text = "👀 แอดมินสามารถดูได้อย่างเดียว (View Only)";
     }
 }
 
-// กฎห้องแชทแอดมิน
+// --- 🔴 กฎห้องแชทแอดมิน ---
 if ($channel === 'admin') {
-    if (!$req_status) { $can_send = false; $lock_text = "🔒 กรุณากด 'ขออนุมัติ' ก่อน"; }
-    if ($group['status'] === 'approved') { $can_send = false; $lock_text = "🔒 โครงงานอนุมัติแล้ว"; }
+    // 1. Draft (หรือยังไม่ขอ) -> ปิด (ต้องกดขอก่อน)
+    if ($group['status'] === 'draft' || !$req_status) { 
+        $can_send = false; 
+        $lock_text = "🔒 สถานะ Draft: กรุณากด 'ขออนุมัติ' เพื่อเปิดช่องทางแอดมิน"; 
+    }
+    
+    // 2. Approved -> ปิดถาวร
+    if ($group['status'] === 'approved') { 
+        $can_send = false; 
+        $lock_text = "🔒 โครงงานอนุมัติแล้ว"; 
+    }
+
+    // 3. Pending / Rejected -> เปิดให้ทุกคนคุยได้ (Default: $can_send = true)
 }
 
-// 7. Handle Post (ส่งข้อความ)
+// 7. Handle Post
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // อนุญาตให้ส่งในแชทแอดมินได้เสมอถ้ายังไม่อนุมัติ (เพื่อให้แก้ได้)
-    if (!$can_send) {
-        if (!($channel == 'admin' && $role == 'admin' && $group['status'] != 'approved')) {
-            header("Location: group_chat.php?id=$group_id&channel=$channel"); 
-            exit; 
-        }
+    
+    // เช็คสิทธิ์การส่ง (ถ้า $can_send = false แสดงว่าถูกล็อก)
+    // ยกเว้นกรณีเดียว: แอดมินในห้องแอดมิน ที่ยังไม่อนุมัติ/draft (ซึ่งจริงๆ $can_send จะ true อยู่แล้วในเคส Pending/Rejected)
+    $isAdminInAdminChannel = ($channel == 'admin' && $role == 'admin' && $group['status'] != 'approved' && $group['status'] != 'draft');
+
+    if (!$can_send && !$isAdminInAdminChannel) {
+        header("Location: group_chat.php?id=$group_id&channel=$channel"); 
+        exit; 
     }
     
     $text = trim($_POST['message'] ?? '');
@@ -183,14 +181,11 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
     .msg-row { display: flex; flex-direction: column; max-width: 70%; }
     .msg-row.me { align-self: flex-end; align-items: flex-end; }
     .msg-row.other { align-self: flex-start; align-items: flex-start; }
-    
     .msg-bubble { padding: 10px 15px; border-radius: 12px; font-size: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); position: relative; word-wrap: break-word; }
     .msg-row.me .msg-bubble { background: #3b82f6; color: white; border-bottom-right-radius: 2px; }
     .msg-row.other .msg-bubble { background: white; color: #334155; border: 1px solid #e2e8f0; border-bottom-left-radius: 2px; }
     .msg-meta { font-size: 11px; margin-top: 4px; color: #94a3b8; }
     .msg-sender { font-weight: bold; font-size: 11px; margin-bottom: 2px; color: #64748b; }
-
-    /* File Attachment */
     .file-attach { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.2); padding: 8px; border-radius: 6px; margin-top: 5px; text-decoration: none; color: inherit; border: 1px solid rgba(255,255,255,0.3); font-size: 13px; }
     .msg-row.other .file-attach { background: #f1f5f9; border-color: #e2e8f0; color: #2563eb; }
 
@@ -200,7 +195,7 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
     .btn-send { background: #3b82f6; color: white; border: none; padding: 0 20px; border-radius: 8px; cursor: pointer; font-weight: bold; }
     .file-btn { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; height: 50px; width: 50px; border-radius: 8px; cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 20px; }
 
-    /* Info Panel & Dropdown */
+    /* Info Panel */
     .info-section { background: white; border-left: 1px solid #ddd; padding: 25px; overflow-y: auto; }
     .info-card { margin-bottom: 25px; }
     .info-title { font-size: 13px; font-weight: bold; text-transform: uppercase; color: #94a3b8; margin-bottom: 10px; }
@@ -284,7 +279,7 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
 
             <div class="chat-input-area">
                 <?php 
-                    $show_input = $can_send || ($channel == 'admin' && $role == 'admin');
+                    $show_input = $can_send || ($channel == 'admin' && $role == 'admin' && $group['status'] != 'approved' && $group['status'] != 'draft');
                 ?>
 
                 <?php if ($show_input): ?>
@@ -337,11 +332,9 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
                 
                 <?php if ($channel == 'admin' && $role == 'student'): ?>
                     <?php if (!$req_status || $req_status == 'rejected'): ?>
-                        
                         <?php if ($req_status == 'rejected'): ?>
                             <div class="reject-alert">
-                                <strong style="display:block;">❌ คำขอล่าสุดถูกปฏิเสธ</strong>
-                                "<?= htmlspecialchars($admin_note) ?>"<br>
+                                <strong>❌ คำขอล่าสุดถูกปฏิเสธ</strong><br>
                                 <small>กรุณาแก้ไขและส่งใหม่</small>
                             </div>
                         <?php endif; ?>
@@ -371,7 +364,7 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
                     <?php else: ?>
                         <span style="color:#999">- ยังไม่มี -</span>
                         <?php if($role=='student'): ?>
-                            <a href="invite_teacher.php?group_id=<?= $group_id ?>" style="display:block; margin-top:5px; font-size:12px; color:#3b82f6;">+ เชิญอาจารย์</a>
+                            <a href="invite_teacher.php?group_id=<?= $group_id ?>" class="action-btn btn-outline" style="margin-top:5px;">+ เชิญอาจารย์</a>
                         <?php endif; ?>
                     <?php endif; ?>
                 </div>

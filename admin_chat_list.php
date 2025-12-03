@@ -96,10 +96,10 @@ $q = $conn->query($sql);
         <p><?= htmlspecialchars($fullname) ?> <br> (Admin)</p>
     </div>
     <div class="nav-links">
+        <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
         <a href="admin_approval_list.php"><i class="fas fa-clipboard-check"></i> อนุมัติโครงงาน</a>
         <a href="admin_chat_list.php" class="active"><i class="fas fa-comments"></i> แชททั้งหมด</a>
-        <a href="list_teachers.php"><i class="fas fa-chalkboard-teacher"></i> จัดการอาจารย์</a>
-        <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
+        <a href="list_teachers.php"><i class="fas fa-chalkboard-teacher"></i> รายชื่ออาจารย์ทั้งหมด</a>
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
 </div>

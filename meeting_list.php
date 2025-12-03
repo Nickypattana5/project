@@ -105,7 +105,7 @@ function render_stars($score) {
         <?php elseif($role == 'teacher'): ?>
             <a href="teacher_groups.php">🔙 กลับรายการกลุ่ม</a>
         <?php elseif($role == 'admin'): ?>
-            <a href="admin_project_list.php">🔙 กลับหน้ารวม</a>
+            <a href="admin_chat_list.php">🔙 กลับหน้ารวม</a>
         <?php endif; ?>
     </div>
     <a href="logout.php" class="logout-btn">🚪 ออกจากระบบ</a>

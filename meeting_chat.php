@@ -27,9 +27,11 @@ if (!$meeting) die("❌ ไม่พบห้องพบปะนี้");
 
 $group_id = $meeting['group_id'];
 
-// 2. ตรวจสิทธิ์
+// 2. ตรวจสิทธิ์ (เพิ่มให้ Admin เข้าได้)
 $allow = false;
-if ($role === 'teacher' && $meeting['advisor_id'] == $user_id) {
+if ($role === 'admin') {
+    $allow = true; // 🔥 แอดมินเข้าได้
+} elseif ($role === 'teacher' && $meeting['advisor_id'] == $user_id) {
     $allow = true;
 } else {
     $chk = $conn->prepare("SELECT id FROM project_members WHERE group_id = ? AND student_id = ?");
@@ -69,6 +71,12 @@ $is_closed = (int)$meeting['is_closed'] === 1;
 // 5. Handle POST (ส่งข้อความ/ปิดห้อง)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
+    // 🔥 ป้องกัน Admin ส่งข้อมูล (View Only)
+    if ($role === 'admin') {
+        header("Location: meeting_chat.php?meeting_id=".$meeting_id);
+        exit;
+    }
+
     // กรณีอาจารย์กดปิดห้อง
     if (isset($_POST['close_meeting']) && $role === 'teacher') {
         $score = intval($_POST['progress_score']);
@@ -177,6 +185,7 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
     .file-label { cursor: pointer; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; height: 50px; width: 50px; display: flex; align-items: center; justify-content: center; background: #f8fafc; transition: 0.2s; }
     .file-label:hover { background: #e2e8f0; }
     .closed-notice { width: 100%; text-align: center; padding: 15px; background: #fffbeb; color: #92400e; border: 1px dashed #fcd34d; border-radius: 8px; font-size: 14px; }
+    .admin-notice { width: 100%; text-align: center; padding: 15px; background: #e0f2fe; color: #0369a1; border: 1px dashed #7dd3fc; border-radius: 8px; font-size: 14px; }
 
     /* Modal */
     .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
@@ -201,7 +210,7 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
         <?php elseif($role == 'teacher'): ?>
             <a href="teacher_groups.php">🔙 กลับรายการกลุ่ม</a>
         <?php elseif($role == 'admin'): ?>
-            <a href="dashboard.php">🏠 แดชบอร์ด</a>
+            <a href="meeting_list.php?group_id=<?= $group_id ?>">🔙 กลับรายการพบปะ</a>
         <?php endif; ?>
     </div>
     <a href="logout.php" class="logout-btn">🚪 ออกจากระบบ</a>
@@ -223,9 +232,10 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
                     <span class="status-badge st-closed">🔴 ปิดแล้ว (<?= $meeting['progress_score'] ?>%)</span>
                 <?php else: ?>
                     <span class="status-badge st-open">🟢 เปิดอยู่</span>
-                    <?php if ($role === 'teacher'): ?>
-                        <button onclick="openModal()" class="btn-close"><i class="fas fa-lock"></i> ปิดห้อง</button>
-                    <?php endif; ?>
+                <?php endif; ?>
+                
+                <?php if ($role === 'teacher' && !$is_closed): ?>
+                    <button onclick="openModal()" class="btn-close"><i class="fas fa-lock"></i> ปิดห้อง</button>
                 <?php endif; ?>
             </div>
         </div>
@@ -271,21 +281,26 @@ function getCleanFileName($path) { return preg_replace('/^\d+_/', '', basename($
         </div>
 
         <div class="input-area">
-            <form method="POST" enctype="multipart/form-data" class="input-wrapper">
-                <label class="file-label" title="แนบไฟล์">
-                    <input type="file" name="chat_file" style="display:none;">
-                    <i class="fas fa-paperclip" style="color:#64748b; font-size:18px;"></i>
-                </label>
-
-                <?php if (!$is_closed): ?>
+            <?php if ($role === 'admin'): ?>
+                <div class="admin-notice"><i class="fas fa-eye"></i> คุณอยู่ในโหมดผู้ดูแลระบบ (ดูได้อย่างเดียว)</div>
+            <?php elseif (!$is_closed): ?>
+                <form method="POST" enctype="multipart/form-data" class="input-wrapper">
+                    <label class="file-label" title="แนบไฟล์">
+                        <input type="file" name="chat_file" style="display:none;">
+                        <i class="fas fa-paperclip" style="color:#64748b; font-size:18px;"></i>
+                    </label>
                     <textarea name="message" class="txt-input" placeholder="พิมพ์ข้อความ..."></textarea>
-                <?php else: ?>
-                    <div class="closed-notice"><i class="fas fa-lock"></i> ปิดการสนทนาแล้ว (ส่งได้เฉพาะไฟล์)</div>
-                <?php endif; ?>
-
-                <button type="submit" class="btn-send">ส่ง <i class="fas fa-paper-plane"></i></button>
-            </form>
+                    <button type="submit" class="btn-send">ส่ง <i class="fas fa-paper-plane"></i></button>
+                </form>
+            <?php else: ?>
+                <div class="closed-notice"><i class="fas fa-lock"></i> ปิดการสนทนาแล้ว (ส่งได้เฉพาะไฟล์)</div>
+                <form method="POST" enctype="multipart/form-data" style="margin-top:10px; text-align:center;">
+                    <input type="file" name="chat_file" required>
+                    <button type="submit" class="btn-send" style="display:inline-flex; width:auto; padding:0 15px;">ส่งไฟล์</button>
+                </form>
+            <?php endif; ?>
         </div>
+
     </div>
 </div>
 

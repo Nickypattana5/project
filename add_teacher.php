@@ -125,9 +125,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <p><?= htmlspecialchars($fullname) ?> <br> (Admin)</p>
     </div>
     <div class="nav-links">
-        <a href="admin_project_list.php"><i class="fas fa-layer-group"></i> จัดการโครงงาน</a>
-        <a href="list_teachers.php" class="active"><i class="fas fa-chalkboard-teacher"></i> จัดการอาจารย์</a>
         <a href="dashboard.php"><i class="fas fa-home"></i> กลับแดชบอร์ด</a>
+        <a href="list_teachers.php" class="active"><i class="fas fa-chalkboard-teacher"></i> รายชื่ออาจารย์ทั้งหมด</a>
+        
     </div>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> ออกจากระบบ</a>
 </div>
